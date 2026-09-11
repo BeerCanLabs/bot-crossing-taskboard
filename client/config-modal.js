@@ -47,7 +47,7 @@ export function renderConfigTab(containerEl, onSaveSuccess) {
     }
   }
 
-  function renderSelectedProvider() {
+  async function renderSelectedProvider() {
     const selectedId = providerSelect.value
     const provider = currentProviders.find((p) => p.id === selectedId)
     if (!provider) return
@@ -55,20 +55,72 @@ export function renderConfigTab(containerEl, onSaveSuccess) {
     descriptionEl.textContent = provider.description || ''
     const savedValues = currentConfig.providers?.[selectedId] || {}
 
-    fieldsContainer.innerHTML = (provider.fields || [])
-      .map((f) => `
-        <div class="config-field">
-          <label for="field-${f.key}">${f.label} ${f.required ? '<span style="color:#ef4444">*</span>' : ''}</label>
-          <input
-            id="field-${f.key}"
-            data-key="${f.key}"
-            type="${f.type || 'text'}"
-            placeholder="${f.placeholder || ''}"
-            value="${escapeAttr(savedValues[f.key] || '')}"
-          />
-        </div>
-      `)
+    let oauthHtml = ''
+    if (selectedId === 'notion') {
+      try {
+        const oauthRes = await fetch('/api/taskboard/oauth/notion/connect?json=1')
+        const oauthData = await oauthRes.json()
+        if (oauthData.ok && oauthData.authUrl) {
+          oauthHtml = `
+            <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px; margin-bottom: 14px;">
+              <div style="font-weight: 600; color: #60a5fa; margin-bottom: 4px;">1-Click Connect</div>
+              <div style="font-size: 12px; color: #94a3b8; margin-bottom: 10px;">Connect your Notion workspace directly without copying or pasting any secrets or IDs.</div>
+              <a href="${oauthData.authUrl}" class="config-btn primary" style="display: inline-block; text-decoration: none; text-align: center;">⚡ Connect with Notion</a>
+            </div>
+          `
+        }
+      } catch {}
+    }
+
+    fieldsContainer.innerHTML = oauthHtml + (provider.fields || [])
+      .map((f) => {
+        const val = savedValues[f.key] || ''
+        const isDbField = selectedId === 'notion' && f.key === 'databaseId'
+        return `
+          <div class="config-field">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <label for="field-${f.key}">${f.label} ${f.required ? '<span style="color:#ef4444">*</span>' : ''}</label>
+              ${isDbField ? '<button type="button" id="btn-discover-dbs" style="background:none; border:none; color:#38bdf8; font-size:11px; cursor:pointer; text-decoration:underline;">🔍 Auto-Discover</button>' : ''}
+            </div>
+            <input
+              id="field-${f.key}"
+              data-key="${f.key}"
+              type="${f.type || 'text'}"
+              placeholder="${f.placeholder || ''}"
+              value="${escapeAttr(val)}"
+            />
+            <div id="field-${f.key}-helper" style="font-size: 11px; color: #64748b; margin-top: 3px;"></div>
+          </div>
+        `
+      })
       .join('')
+
+    const discoverBtn = fieldsContainer.querySelector('#btn-discover-dbs')
+    if (discoverBtn) {
+      discoverBtn.addEventListener('click', async () => {
+        discoverBtn.textContent = 'Searching Notion...'
+        try {
+          const res = await fetch('/api/taskboard/databases?providerId=notion')
+          const data = await res.json()
+          if (data.ok && data.databases?.length > 0) {
+            const dbInput = fieldsContainer.querySelector('#field-databaseId')
+            const helper = fieldsContainer.querySelector('#field-databaseId-helper')
+            if (dbInput) {
+              dbInput.value = data.databases[0].id
+            }
+            if (helper) {
+              helper.style.color = '#34d399'
+              helper.textContent = `✓ Auto-selected "${data.databases[0].title}" (${data.databases.length} found)`
+            }
+            discoverBtn.textContent = '✓ Discovered'
+          } else {
+            discoverBtn.textContent = 'No databases found'
+          }
+        } catch {
+          discoverBtn.textContent = 'Discovery failed'
+        }
+      })
+    }
   }
 
   function getFormValues() {
@@ -98,7 +150,16 @@ export function renderConfigTab(containerEl, onSaveSuccess) {
       const data = await res.json()
       if (data.ok) {
         statusEl.className = 'config-status-msg ok'
-        statusEl.textContent = `✓ Connected successfully${data.user ? ` (${data.user})` : ''}!`
+        const detail = data.message || (data.name ? `"${data.name}"` : data.user || '')
+        statusEl.textContent = `✓ Connected successfully${detail ? `: ${detail}` : ''}`
+
+        // If database was auto-discovered during test, populate it in the field
+        if (data.databaseId) {
+          const dbInput = fieldsContainer.querySelector('#field-databaseId')
+          if (dbInput && !dbInput.value) {
+            dbInput.value = data.databaseId
+          }
+        }
       } else {
         statusEl.className = 'config-status-msg err'
         statusEl.textContent = `✕ Connection failed: ${data.error}`

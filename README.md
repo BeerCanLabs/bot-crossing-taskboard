@@ -61,7 +61,7 @@ Click the **Configure ⚙️** tab on the Task Board to connect your team's tool
 | Provider | Supported Features |
 | :--- | :--- |
 | **GitHub Issues** | Repositories, PAT auth, label filters, deep links |
-| **Notion** | Database UUID, custom status/assignee property mapping |
+| **Notion** | **Zero-Paste**: 1-Click OAuth connect & `/v1/search` automatic database discovery (no UUID copying required) |
 | **Jira Software** | Jira Cloud API tokens, JQL queries, sprint tickets |
 | **Linear** | Personal API tokens, team filters |
 | **Paperclip** | Server URL, company tasks & goals |

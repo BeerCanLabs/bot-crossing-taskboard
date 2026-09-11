@@ -1,47 +1,108 @@
 /**
  * Notion Database task provider for Bot Crossing Task Board.
+ * Supports zero-paste auto-discovery via Notion /v1/search API.
  */
+
+/**
+ * Searches for all databases shared with the integration token.
+ */
+export async function discoverDatabases(apiKey) {
+  if (!apiKey) return []
+  try {
+    const res = await fetch('https://api.notion.com/v1/search', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Notion-Version': '2022-06-28',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        filter: { value: 'database', property: 'object' },
+        page_size: 50,
+      }),
+    })
+
+    if (!res.ok) return []
+    const data = await res.json()
+    return (data.results || []).map((db) => {
+      const title = db.title?.map((t) => t.plain_text).join('') || 'Untitled Database'
+      return {
+        id: db.id,
+        title,
+        url: db.url,
+        properties: Object.keys(db.properties || {}),
+        lastEditedTime: db.last_edited_time,
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
 export default {
   id: 'notion',
   name: 'Notion',
-  description: 'Sync tasks and project tickets directly from a Notion Database.',
+  description: 'Sync tasks and project tickets directly from a Notion Database with auto-discovery.',
   fields: [
     {
       key: 'apiKey',
-      label: 'Notion Internal Integration Secret',
+      label: 'Notion API Token',
       type: 'password',
-      placeholder: 'secret_...',
-      required: true,
+      placeholder: 'ntn_... (or leave blank if NOTION_API_KEY is in environment)',
+      required: false,
     },
     {
       key: 'databaseId',
-      label: 'Notion Database ID',
+      label: 'Database',
       type: 'text',
-      placeholder: '32-character database UUID from page URL',
-      required: true,
+      placeholder: 'Leave blank to auto-discover databases from Notion',
+      required: false,
     },
     {
       key: 'statusProperty',
       label: 'Status Property Name',
       type: 'text',
-      placeholder: 'Status (default)',
+      placeholder: 'Status (auto-detected if blank)',
       required: false,
     },
     {
       key: 'assigneeProperty',
       label: 'Assignee Property Name',
       type: 'text',
-      placeholder: 'Assignee or Owner (default)',
+      placeholder: 'Assignee, Owner, or Agent (auto-detected if blank)',
       required: false,
     },
   ],
 
   async test(config = {}) {
     const apiKey = config.apiKey || process.env.NOTION_API_KEY || process.env.NOTION_TOKEN || ''
-    const databaseId = config.databaseId || process.env.NOTION_DATABASE_ID || ''
-    if (!apiKey || !databaseId) {
-      return { ok: false, error: 'API Secret and Database ID are required' }
+    if (!apiKey) {
+      return { ok: false, error: 'Notion API Token is required (or set NOTION_API_KEY in environment)' }
     }
+
+    let databaseId = config.databaseId || process.env.NOTION_DATABASE_ID || ''
+    let databases = []
+
+    // If database ID is omitted, auto-discover all accessible databases
+    if (!databaseId) {
+      databases = await discoverDatabases(apiKey)
+      if (databases.length === 0) {
+        return {
+          ok: false,
+          error: 'Connected to Notion, but no databases are shared with this integration. Share a database or page with your integration in Notion.',
+        }
+      }
+      databaseId = databases[0].id
+      return {
+        ok: true,
+        name: databases[0].title,
+        databaseId: databases[0].id,
+        databases,
+        autoDiscovered: true,
+        message: `Discovered "${databases[0].title}" (${databases.length} database${databases.length > 1 ? 's' : ''} available)`,
+      }
+    }
+
     const cleanId = databaseId.replace(/-/g, '')
     try {
       const res = await fetch(`https://api.notion.com/v1/databases/${cleanId}`, {
@@ -52,8 +113,8 @@ export default {
       })
       if (res.ok) {
         const data = await res.json()
-        const title = data.title?.[0]?.plain_text || 'Untitled Database'
-        return { ok: true, name: title }
+        const title = data.title?.map((t) => t.plain_text).join('') || 'Untitled Database'
+        return { ok: true, name: title, databaseId: data.id }
       }
       return { ok: false, error: `Notion returned ${res.status}: ${res.statusText}` }
     } catch (err) {
@@ -61,13 +122,40 @@ export default {
     }
   },
 
+  async discover(config = {}) {
+    const apiKey = config.apiKey || process.env.NOTION_API_KEY || process.env.NOTION_TOKEN || ''
+    return discoverDatabases(apiKey)
+  },
+
   async fetchTasks(config = {}) {
     const apiKey = config.apiKey || process.env.NOTION_API_KEY || process.env.NOTION_TOKEN || ''
-    const databaseId = config.databaseId || process.env.NOTION_DATABASE_ID || ''
-    if (!apiKey || !databaseId) return []
+    if (!apiKey) return []
+
+    let databaseId = config.databaseId || process.env.NOTION_DATABASE_ID || ''
+    let statusProp = config.statusProperty || ''
+    let assigneeProp = config.assigneeProperty || ''
+
+    // Auto-discover database if missing
+    if (!databaseId) {
+      const databases = await discoverDatabases(apiKey)
+      if (databases.length === 0) return []
+      // Prioritize database matching task/ops/board keywords
+      const preferred = databases.find((d) => /task|ops|board|submind|project/i.test(d.title)) || databases[0]
+      databaseId = preferred.id
+
+      // Auto-detect property names from schema
+      if (!statusProp) {
+        statusProp = preferred.properties.find((p) => /status|state/i.test(p)) || 'Status'
+      }
+      if (!assigneeProp) {
+        assigneeProp = preferred.properties.find((p) => /agent|assignee|owner/i.test(p)) || 'Assignee'
+      }
+    } else {
+      if (!statusProp) statusProp = 'Status'
+      if (!assigneeProp) assigneeProp = 'Assignee'
+    }
+
     const cleanId = databaseId.replace(/-/g, '')
-    const statusProp = config.statusProperty || 'Status'
-    const assigneeProp = config.assigneeProperty || 'Assignee'
 
     try {
       const res = await fetch(`https://api.notion.com/v1/databases/${cleanId}/query`, {
@@ -107,13 +195,15 @@ export default {
           status = 'blocked'
         }
 
-        // Extract assignee
+        // Extract assignee (checks people, select, or rich_text)
         const assigneeVal = page.properties?.[assigneeProp]
         let assignee = 'Unassigned'
         if (assigneeVal?.people?.[0]?.name) {
           assignee = assigneeVal.people.map((p) => p.name).join(', ')
         } else if (assigneeVal?.select?.name) {
           assignee = assigneeVal.select.name
+        } else if (assigneeVal?.rich_text?.[0]?.plain_text) {
+          assignee = assigneeVal.rich_text.map((t) => t.plain_text).join('')
         }
 
         return {
