@@ -28,7 +28,8 @@
   ],
   "exports": {
     ".": "./index.js",
-    "./client": "./client/inject.js"
+    "./client": "./client/inject.js",
+    "./*": "./*"
   },
   "peerDependencies": {
     "three": ">=0.160.0",

@@ -1,6 +1,8 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createTaskBoardMiddleware } from './server/middleware.js'
+import { loadTaskConfig, saveTaskConfig } from './server/config-store.js'
+import { PROVIDERS, getProvider } from './server/providers/index.js'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 
@@ -44,4 +46,10 @@ export default function taskBoardPlugin(options = {}) {
   }
 }
 
-export { createTaskBoardMiddleware }
+export {
+  createTaskBoardMiddleware,
+  loadTaskConfig,
+  saveTaskConfig,
+  PROVIDERS,
+  getProvider,
+}
