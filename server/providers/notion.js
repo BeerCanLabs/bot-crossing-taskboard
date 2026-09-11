@@ -36,15 +36,17 @@ export default {
     },
   ],
 
-  async test(config) {
-    if (!config.apiKey || !config.databaseId) {
+  async test(config = {}) {
+    const apiKey = config.apiKey || process.env.NOTION_API_KEY || process.env.NOTION_TOKEN || ''
+    const databaseId = config.databaseId || process.env.NOTION_DATABASE_ID || ''
+    if (!apiKey || !databaseId) {
       return { ok: false, error: 'API Secret and Database ID are required' }
     }
-    const cleanId = config.databaseId.replace(/-/g, '')
+    const cleanId = databaseId.replace(/-/g, '')
     try {
       const res = await fetch(`https://api.notion.com/v1/databases/${cleanId}`, {
         headers: {
-          Authorization: `Bearer ${config.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'Notion-Version': '2022-06-28',
         },
       })
@@ -60,8 +62,10 @@ export default {
   },
 
   async fetchTasks(config = {}) {
-    if (!config.apiKey || !config.databaseId) return []
-    const cleanId = config.databaseId.replace(/-/g, '')
+    const apiKey = config.apiKey || process.env.NOTION_API_KEY || process.env.NOTION_TOKEN || ''
+    const databaseId = config.databaseId || process.env.NOTION_DATABASE_ID || ''
+    if (!apiKey || !databaseId) return []
+    const cleanId = databaseId.replace(/-/g, '')
     const statusProp = config.statusProperty || 'Status'
     const assigneeProp = config.assigneeProperty || 'Assignee'
 
@@ -69,7 +73,7 @@ export default {
       const res = await fetch(`https://api.notion.com/v1/databases/${cleanId}/query`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${config.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'Notion-Version': '2022-06-28',
           'Content-Type': 'application/json',
         },
